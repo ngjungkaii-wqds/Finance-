@@ -71,7 +71,7 @@ def holdings_quality(tab: pd.DataFrame, w: pd.Series) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2012-01-01", help="first price date to download")
-    ap.add_argument("--first-game", default="2015-06-01")
+    ap.add_argument("--first-game", default="2016-01-04", help="first game start (the complete record starts in 2016)")
     ap.add_argument("--sec", action="store_true", help="add SEC EDGAR point-in-time US accounts")
     ap.add_argument("--quick", action="store_true", help="every 3rd game only")
     ap.add_argument("--synthetic", action="store_true", help="offline self-test")

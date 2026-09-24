@@ -53,15 +53,17 @@ class FFQStrategy:
     optimizer       "maxsharpe" (with the capital allocation line) or "equal"
     universe        "liquid" (SG 46 + top-40 US by liquidity) or "legacy" (SG 46 + US 28 + gold)
     countries       ("SG", "US") or a subset, e.g. ("US",) for the long SEC-EDGAR test
+    exclude         tickers removed after the human red-flag check
     """
 
     def __init__(self, m: Market, fe: FactorEngine, periods: dict, use_gate=True,
                  use_fund_score=True, optimizer="maxsharpe", universe="liquid",
-                 countries=("SG", "US"), name="FFQ"):
+                 countries=("SG", "US"), exclude=(), name="FFQ"):
         self.m, self.fe, self.periods = m, fe, periods
         self.use_gate, self.use_fund_score = use_gate, use_fund_score
         self.optimizer, self.universe, self.name = optimizer, universe, name
         self.countries = tuple(countries)
+        self.exclude = set(exclude)                # red-flag vetoes: removed from the universe
         self._count = m.px.notna().cumsum()      # days of history per stock, by date
 
     # ---- universe ------------------------------------------------------------
@@ -77,7 +79,7 @@ class FFQStrategy:
             else:
                 pool = [t for t in C.US_POOL if t in m.px.columns]
                 us = [t for t in us_liquid(m, i, pool, C.US_TOP_N) if t in long_enough]
-        return [t for t in sg + us if pd.notna(m.px[t].iloc[i])]
+        return [t for t in sg + us if pd.notna(m.px[t].iloc[i]) and t not in self.exclude]
 
     # ---- fundamentals at a date ----------------------------------------------
     def fundamentals_at(self, tickers, i: int) -> dict:
@@ -174,6 +176,7 @@ class FFQStrategy:
                 table.loc[E.index, c] = E[c]
         cand = []
         for ctry, g in E.groupby("country"):
+            g = g[g["score"] >= C.SCORE_MIN]           # above-average among those that pass
             cand += list(g.sort_values("score", ascending=False).index[: C.CANDIDATES_PER_COUNTRY])
         cand = sorted(cand, key=lambda t: -float(E.at[t, "score"]))
 
@@ -181,6 +184,7 @@ class FFQStrategy:
         log = []
         picked = R.select(cand, cinfo.get("lw_corr", pd.DataFrame()), C.N_MAX, log)
         diag.update(n_candidates=len(cand), lw_shrinkage=cinfo.get("lw_shrinkage"))
+        table["rank"] = table["score"].rank(ascending=False)
         if not picked:
             return Book(date=date, weights=pd.Series(dtype=float), table=table, log=log, diag=diag)
 

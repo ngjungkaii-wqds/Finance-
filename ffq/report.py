@@ -401,6 +401,9 @@ def write_report(state: dict, out_dir: str) -> str:
         L.append("Before about 2024 Yahoo has no point-in-time accounts, so this section tests only the parts "
                  "that need prices: FF3 residual momentum, the covariance model, the correlation gate, the "
                  "max-Sharpe optimiser and the capital allocation line.\n")
+        L.append("The legacy rows are the momentum rulebook rebuilt on this data, with commission and the -25% "
+                 "stop applied to every variant. The complete record's +5.06% 'selection per dollar' figure "
+                 "had no stop, so expect the legacy mean here to be somewhat lower.\n")
         L.append(_stats_rows(games, keys_long, all_idx))
         L.append("\n")
         L.append(_nav_block(state, keys_long, all_idx, phases))

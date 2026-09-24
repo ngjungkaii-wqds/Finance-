@@ -1,0 +1,68 @@
+# Runs only when started by hand: GitHub -> Actions -> "FFQ backtest and screen" -> Run workflow.
+# Works from the GitHub mobile app too. Results are committed to reports/ on the branch you run it on.
+name: FFQ backtest and screen
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "What to run"
+        type: choice
+        options: [both, screen, backtest]
+        default: both
+      sec:
+        description: "Also use SEC EDGAR accounts (adds the 2015-2026 US test)"
+        type: boolean
+        default: true
+      quick:
+        description: "Quick backtest (every 3rd game, about a third of the time)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT || 'ACC2026 backtest research@example.com' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Cache downloaded data
+        uses: actions/cache@v4
+        with:
+          path: data_cache
+          key: data-${{ github.run_id }}
+          restore-keys: data-
+      - name: Offline self-test
+        run: python -m pytest -q tests
+      - name: Weekly screen
+        if: inputs.task != 'backtest'
+        run: |
+          ARGS=""
+          if [ -f holdings.csv ]; then ARGS="$ARGS --holdings holdings.csv"; fi
+          if [ "${{ inputs.sec }}" = "true" ]; then ARGS="$ARGS --sec"; fi
+          python screener.py $ARGS
+      - name: Backtest
+        if: inputs.task != 'screen'
+        run: |
+          ARGS=""
+          if [ "${{ inputs.sec }}" = "true" ]; then ARGS="$ARGS --sec"; fi
+          if [ "${{ inputs.quick }}" = "true" ]; then ARGS="$ARGS --quick"; fi
+          python run_backtest.py $ARGS
+      - name: Commit reports
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports
+          git commit -m "FFQ reports: ${{ inputs.task }} run ${{ github.run_number }}" || echo "Nothing to commit"
+          git push

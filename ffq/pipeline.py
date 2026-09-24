@@ -44,6 +44,7 @@ def load(provider=None, start: str = "2012-01-01", use_sec: bool = False, stocks
             notes.append(f"{tk}: accounts unavailable ({type(exc).__name__})")
             annual, quarters = [], []
         acc = FU.Accounts(annual=annual, quarters=quarters, ttm=FU.ttm_from_quarters(quarters))
+        notes += [f"{tk}: {x}" for x in FU.check_ttm(acc)]
         last_px = m.raw_local[tk].dropna()
         if annual and len(last_px):
             notes += [f"{tk}: {x}" for x in FU.fix_share_basis(acc, m.info.get(tk, {}), float(last_px.iloc[-1]))]
@@ -63,6 +64,9 @@ def load(provider=None, start: str = "2012-01-01", use_sec: bool = False, stocks
                 last = max(p.end for p in sa.ttm) if sa.ttm else pd.Timestamp.min
                 sa.ttm += [q for q in yh.ttm if q.end > last + pd.Timedelta(days=20)]
                 sa.quarters = yh.quarters
+            last_px = m.raw_local[tk].dropna()
+            if len(last_px):
+                notes += [f"{tk} (SEC): {x}" for x in FU.fix_share_basis(sa, m.info.get(tk, {}), float(last_px.iloc[-1]))]
             accounts[tk] = sa
         notes.append(f"SEC EDGAR accounts loaded for {len(sec)} US stocks")
     source = {tk: a.source for tk, a in accounts.items() if a.annual}

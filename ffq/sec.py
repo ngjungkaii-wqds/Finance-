@@ -54,10 +54,12 @@ TAGS = {
                (G, "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
                (I, "EquityAttributableToOwnersOfParent"), (I, "Equity")],
     "assets": [(G, "Assets"), (I, "Assets")],
-    "lt_debt": [(G, "LongTermDebt"), (G, "LongTermDebtNoncurrent"), (I, "NoncurrentPortionOfNoncurrentBorrowings"),
-                (I, "Borrowings")],
-    "current_debt": [(G, "LongTermDebtCurrent"), (G, "DebtCurrent"), (G, "ShortTermBorrowings"),
-                     (I, "CurrentPortionOfNoncurrentBorrowings")],
+    # debt = LongTermDebt (which includes its current portion), else non-current + current
+    # portions; plus short-term borrowings / commercial paper
+    "lt_debt": [(G, "LongTermDebt"), (I, "Borrowings")],
+    "lt_debt_nc": [(G, "LongTermDebtNoncurrent"), (I, "NoncurrentPortionOfNoncurrentBorrowings")],
+    "ltd_current": [(G, "LongTermDebtCurrent"), (I, "CurrentPortionOfNoncurrentBorrowings")],
+    "current_debt": [(G, "ShortTermBorrowings"), (G, "CommercialPaper")],
     "current_assets": [(G, "AssetsCurrent"), (I, "CurrentAssets")],
     "current_liabilities": [(G, "LiabilitiesCurrent"), (I, "CurrentLiabilities")],
     "shares": [(D, "EntityCommonStockSharesOutstanding"), (G, "CommonStockSharesOutstanding")],
@@ -121,6 +123,16 @@ def _facts(js: dict, tax: str, tag: str, forms=None) -> list:
     return out
 
 
+def _dei_shares(facts, accn):
+    """Shares outstanding on a filing's cover page, summed across share classes."""
+    fs = [f for f in facts if f.get("accn") == accn]
+    if not fs:
+        return None
+    last = max(f["end"] for f in fs)
+    vals = {float(f["val"]) for f in fs if f["end"] == last}
+    return float(sum(vals)) if vals else None
+
+
 def _earliest(facts, pred):
     best = None
     for f in facts:
@@ -134,6 +146,18 @@ def _days(a, b) -> int:
 
 
 NEG = {"capex", "dividends_paid"}   # SEC reports these payments as positive numbers
+EXTRA = ["lt_debt_nc", "ltd_current"]
+
+
+def _total_debt(v: dict) -> float:
+    lt = v.get("lt_debt", np.nan)
+    if np.isnan(lt):
+        parts = [x for x in (v.get("lt_debt_nc", np.nan), v.get("ltd_current", np.nan)) if not np.isnan(x)]
+        lt = sum(parts) if parts else np.nan
+    st = v.get("current_debt", np.nan)
+    if np.isnan(lt) and np.isnan(st):
+        return np.nan
+    return (0.0 if np.isnan(lt) else lt) + (0.0 if np.isnan(st) else st)
 
 
 def ttm_from_companyfacts(js: dict, annual: list, splits: pd.Series | None = None) -> list[Period]:
@@ -161,8 +185,6 @@ def ttm_from_companyfacts(js: dict, annual: list, splits: pd.Series | None = Non
             a = f.get("accn")
             if a not in filings or e > filings[a][0]:
                 filings[a] = (e, min(fd, filings.get(a, (e, fd))[1]))
-        if filings:
-            break
     out = {}
     for accn, (E, F) in filings.items():
         fys = [p for p in annual if p.end < E - pd.Timedelta(days=20) and p.avail <= F + pd.Timedelta(days=5)]
@@ -171,7 +193,7 @@ def ttm_from_companyfacts(js: dict, annual: list, splits: pd.Series | None = Non
         fy = fys[-1]
         fy_start = fy.end + pd.Timedelta(days=1)
         lim = F + pd.Timedelta(days=5)
-        v = {k: np.nan for k in FIELDS}
+        v = {k: np.nan for k in list(FIELDS) + EXTRA}
         for key in [k for k in FLOW_KEYS if k != "fcf"]:
             fyv = fy.v.get(key, np.nan)
             if np.isnan(fyv):
@@ -190,11 +212,15 @@ def ttm_from_companyfacts(js: dict, annual: list, splits: pd.Series | None = Non
                 sgn = -1.0 if key in NEG else 1.0
                 v[key] = fyv + sgn * (float(ytd["val"]) - float(ytd_py["val"]))
                 break
-        for key in STOCK_KEYS:
+        for key in STOCK_KEYS + EXTRA:
             for tax, tag in TAGS.get(key, []):
                 fl = facts(tax, tag)
                 if key == "shares" and tax == D:
-                    f = _earliest(fl, lambda f: f.get("accn") == accn)
+                    tot = _dei_shares(fl, accn)
+                    if tot is not None:
+                        v[key] = tot
+                        break
+                    continue
                 else:
                     f = _earliest(fl, lambda f: "start" not in f and pd.Timestamp(f["filed"]) <= lim
                                   and _days(f["end"], E) <= 7)
@@ -202,8 +228,7 @@ def ttm_from_companyfacts(js: dict, annual: list, splits: pd.Series | None = Non
                     v[key] = float(f["val"])
                     break
         v["fcf"] = v["ocf"] + v["capex"] if not (np.isnan(v["ocf"]) or np.isnan(v["capex"])) else np.nan
-        parts = [x for x in (v["lt_debt"], v["current_debt"]) if not np.isnan(x)]
-        v["debt"] = sum(parts) if parts else np.nan
+        v["debt"] = _total_debt(v)
         if splits is not None and len(splits):
             later = splits[(splits.index > F) & (splits > 0)]
             factor = float(np.prod(later.values)) if len(later) else 1.0
@@ -238,27 +263,32 @@ def periods_from_companyfacts(js: dict, splits: pd.Series | None = None) -> list
             if not 330 <= (e - s).days <= 380:
                 continue
             filed = pd.Timestamp(f["filed"])
-            if e not in fy or filed < fy[e]["filed"]:
-                fy[e] = {"filed": filed, "accn": f.get("accn")}
-        if fy:
-            break
+            # one entry per fiscal year end (a 52/53-week year can shift the end by a few days)
+            key = next((k for k in fy if abs((k - e).days) <= 7), e)
+            if key not in fy or filed < fy[key]["filed"]:
+                fy[key] = {"filed": filed, "accn": f.get("accn")}
     if not fy:
         return []
     out = []
     for end in sorted(fy):
         filed, accn = fy[end]["filed"], fy[end]["accn"]
         v = {}
-        for key in FIELDS:
+        for key in list(FIELDS) + EXTRA:
             v[key] = np.nan
             for tax, tag in TAGS.get(key, []):
                 best = None
+                if key == "shares" and tax == D:
+                    tot = _dei_shares(_facts(js, tax, tag), accn)
+                    if tot is not None:
+                        v[key] = tot
+                        break
+                    continue
                 for f in _facts(js, tax, tag):
                     fd = pd.Timestamp(f["filed"])
                     if fd > filed + pd.Timedelta(days=5):
                         continue   # figure not public when this year's 10-K came out
                     if key == "shares" and tax == D:
-                        if f.get("accn") != accn:
-                            continue
+                        continue
                     else:
                         if abs((pd.Timestamp(f["end"]) - end).days) > 7:
                             continue
@@ -276,8 +306,7 @@ def periods_from_companyfacts(js: dict, splits: pd.Series | None = None) -> list
         if np.isnan(v["gross_profit"]) and not np.isnan(v["revenue"]) and not np.isnan(v["cogs"]):
             v["gross_profit"] = v["revenue"] - v["cogs"]
         v["fcf"] = v["ocf"] + v["capex"] if not (np.isnan(v["ocf"]) or np.isnan(v["capex"])) else np.nan
-        parts = [x for x in (v["lt_debt"], v["current_debt"]) if not np.isnan(x)]
-        v["debt"] = sum(parts) if parts else np.nan
+        v["debt"] = _total_debt(v)
         # restate per-share figures to today's basis
         if splits is not None and len(splits):
             later = splits[(splits.index > filed) & (splits > 0)]

@@ -171,6 +171,7 @@ FF_MIN_WEEKS = 104
 SKIP_DAYS = 21              # formation window ends 21 trading days ago (skip last month)
 FORM_DAYS = 252             # and starts 252 trading days ago (12-1, as in the rulebook)
 IC = 0.05                   # information coefficient for alpha = IC * resid vol * score
+SCORE_MIN = 0.0             # buy only stocks at or above the average score of those passing the gate
 
 # --------------------------------------------------------------------------------------
 # Portfolio construction and risk management

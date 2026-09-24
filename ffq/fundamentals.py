@@ -175,15 +175,41 @@ def fix_share_basis(acc: "Accounts", info: dict, price_local_now: float) -> list
     r = sh * price_local_now / float(mc)
     if 0.6 < r < 1.6:
         return []
-    if _split_like(r):
-        for p in recs:
-            for k in ("shares", "shares_avg"):
-                if not np.isnan(p.v.get(k, np.nan)):
-                    p.v[k] /= r
-            if not np.isnan(p.v.get("eps", np.nan)):
-                p.v["eps"] *= r
-        return [f"share count restated by {1 / r:.2f}x to today's basis (split after period end)"]
-    return [f"share count x price is {r:.2f}x Yahoo's market value: check valuation ratios"]
+    # off by a split ratio (old share basis) or by a share-class convention (e.g. A vs B
+    # shares): restate every period to the basis of Yahoo's quoted market value
+    for p in recs:
+        for k in ("shares", "shares_avg"):
+            if not np.isnan(p.v.get(k, np.nan)):
+                p.v[k] /= r
+        if not np.isnan(p.v.get("eps", np.nan)):
+            p.v["eps"] *= r
+    kind = "a stock split after period end" if _split_like(r) else "a share-class or unit mismatch"
+    return [f"share count restated by {1 / r:.3g}x to match Yahoo's market value ({kind})"]
+
+
+def check_ttm(acc: "Accounts") -> list[str]:
+    """Drop TTM records whose revenue is implausible against the annual report.
+
+    Some Singapore companies report half-yearly; if Yahoo labels the periods
+    inconsistently, a sum of 'quarters' can double-count. A TTM revenue outside
+    0.6-1.8x the latest annual revenue is treated as a data error.
+    """
+    if not acc.ttm or not acc.annual:
+        return []
+    bad = []
+    for t in acc.ttm:
+        prior = [p for p in acc.annual if p.end <= t.end]
+        if not prior:
+            continue
+        ra, rt = prior[-1].v.get("revenue", np.nan), t.v.get("revenue", np.nan)
+        if np.isnan(ra) or np.isnan(rt) or ra <= 0:
+            continue
+        if not 0.6 <= rt / ra <= 1.8:
+            bad.append(t)
+    if bad:
+        acc.ttm = [t for t in acc.ttm if t not in bad]
+        return [f"{len(bad)} trailing-twelve-month record(s) dropped: revenue inconsistent with the annual report"]
+    return []
 
 
 def asof(periods: list[Period], date) -> tuple:
