@@ -161,6 +161,7 @@ DE_MAX = 2.0                # non-financials: total debt / equity
 REIT_GEARING_MAX = 0.50     # REITs and trusts: total debt / total assets (MAS limit 50%)
 BANK_EQ_ASSETS_MIN = 0.05   # banks and insurers: equity / assets
 PE_MAX = 60.0               # valuation sanity: trailing P/E must be positive and at most 60
+GATES = ("G1", "G2", "G3", "G4", "G5", "G6")   # tests applied (the robustness run switches one off)
 
 # --------------------------------------------------------------------------------------
 # Ranking score (computed only among stocks that pass the gate)

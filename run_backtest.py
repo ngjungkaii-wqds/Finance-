@@ -29,6 +29,44 @@ from ffq.strategy import FFQStrategy
 
 HELD_COLS = ["gate_pass", "roe", "k_e", "fscore", "ni_growth", "pe", "de", "net_margin"]
 
+ALL_GATES = ("G1", "G2", "G3", "G4", "G5", "G6")
+# Robustness run: each line changes ONE rule. Reported to show how much each rule matters;
+# never used to choose the rules (they were fixed on 24 Sep 2026).
+SENSITIVITY = [
+    ("Base (rules as specified)", {}, C.STOP),
+    ("Without G2 (ROE >= SML cost of equity)", {"GATES": tuple(g for g in ALL_GATES if g != "G2")}, C.STOP),
+    ("Without G3 (Piotroski F-score)", {"GATES": tuple(g for g in ALL_GATES if g != "G3")}, C.STOP),
+    ("Without G4 (profit not falling)", {"GATES": tuple(g for g in ALL_GATES if g != "G4")}, C.STOP),
+    ("Without G6 (P/E cap)", {"GATES": tuple(g for g in ALL_GATES if g != "G6")}, C.STOP),
+    ("Score: residual momentum only", {"W_MOM": 1.0, "W_QUAL": 0.0, "W_VALUE": 0.0}, C.STOP),
+    ("Score: equal thirds", {"W_MOM": 1 / 3, "W_QUAL": 1 / 3, "W_VALUE": 1 / 3}, C.STOP),
+    ("Correlation limit 0.55", {"CORR_MAX_PAIR": 0.55}, C.STOP),
+    ("Correlation limit 0.75", {"CORR_MAX_PAIR": 0.75}, C.STOP),
+    ("No volatility target (fully invested)", {"SIGMA_TARGET": 10.0}, C.STOP),
+    ("No -25% stop", {}, None),
+    ("Market risk premium 4.5%", {"MRP": 0.045}, C.STOP),
+    ("Market risk premium 6.5%", {"MRP": 0.065}, C.STOP),
+]
+
+
+def run_sensitivity(m, fe, periods, starts, universes, countries=("SG", "US"), verbose=True) -> dict:
+    out = {}
+    for n, (label, over, stop) in enumerate(SENSITIVITY, 1):
+        saved = {k: getattr(C, k) for k in over}
+        try:
+            for k, v in over.items():
+                setattr(C, k, v)
+            strat = FFQStrategy(m, fe, periods, countries=countries)
+            W = {i: strat.book(m.dates[i]).weights for i in starts}
+        finally:
+            for k, v in saved.items():
+                setattr(C, k, v)
+        g, _ = run_games(m, W, universes, stop=stop)
+        out[label] = g
+        if verbose:
+            print(f"  robustness {n}/{len(SENSITIVITY)}: {label}", flush=True)
+    return out
+
 
 def coverage(strat: FFQStrategy, i: int) -> float:
     """Share of the universe with two published years of accounts at start i.
@@ -75,6 +113,8 @@ def main():
     ap.add_argument("--sec", action="store_true", help="add SEC EDGAR point-in-time US accounts")
     ap.add_argument("--quick", action="store_true", help="every 3rd game only")
     ap.add_argument("--synthetic", action="store_true", help="offline self-test")
+    ap.add_argument("--sensitivity", action="store_true",
+                    help="also re-run FFQ with one rule changed at a time (adds 15-40 minutes)")
     ap.add_argument("--out", default="reports")
     args = ap.parse_args()
     t0 = time.time()
@@ -158,8 +198,20 @@ def main():
             games[k] = (g, paths)
             print(f"  simulated {k}: {len(g)} games", flush=True)
 
+    sens = {}
+    if args.sensitivity:
+        full_starts = [i for i in starts if cov[i] >= 0.6]
+        if full_starts:
+            print(f"Robustness run on {len(full_starts)} full-accounts games", flush=True)
+            sens["Singapore + US, full-accounts period"] = run_sensitivity(m, fe, periods, full_starts, universes)
+        if args.sec and W.get("FFQ_US"):
+            us_starts = sorted(W["FFQ_US"])[::3]
+            print(f"Robustness run on {len(us_starts)} US-only SEC games (every 3rd start)", flush=True)
+            sens["US only, SEC accounts (every 3rd game)"] = run_sensitivity(m, fe, periods, us_starts, universes,
+                                                                          countries=("US",))
+
     os.makedirs(args.out, exist_ok=True)
-    state = {"games": {k: v[0] for k, v in games.items()}, "paths": {k: v[1] for k, v in games.items()},
+    state = {"sensitivity": sens,"games": {k: v[0] for k, v in games.items()}, "paths": {k: v[1] for k, v in games.items()},
              "coverage": pd.Series({m.dates[i]: c for i, c in cov.items()}),
              "bookinfo": pd.DataFrame(bookinfo), "quality": pd.DataFrame(quality),
              "notes": notes, "source": source, "synthetic": args.synthetic, "sec": args.sec,

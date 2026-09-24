@@ -18,6 +18,7 @@ python screener.py                              # this week's book for a USD 1m 
 python screener.py --holdings holdings.csv      # ...plus buy/sell orders from what you hold now
 python run_backtest.py --quick                  # first look at the backtest (every 3rd game)
 python run_backtest.py --sec                    # full backtest, Yahoo + SEC EDGAR (20-40 minutes)
+python run_backtest.py --sec --sensitivity      # ...plus the one-rule-at-a-time robustness table
 ```
 
 - **Holdings file:** copy `holdings_template.csv` to `holdings.csv` and type your actual share counts.

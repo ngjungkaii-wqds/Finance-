@@ -1,6 +1,7 @@
 # FFQ: a Fama–French quality strategy for ACC2026
 
-**Written:** 24 Sep 2026. **Status:** rules fixed; backtest not yet run on real data (see section 8).
+**Written:** 24 Sep 2026. **Status:** rules fixed; backtest code complete and tested offline, not yet run on
+real data (the session that wrote it could not reach Yahoo Finance; see section 8 and the README).
 **Code:** `ffq/` (engine), `screener.py` (weekly book), `run_backtest.py` (backtest). All parameters are in `ffq/config.py`.
 **Replaces:** the selection step of the momentum rulebook (`ACC2026_COMPLETE_RECORD.md` section 19). The −25% per-lot stop, the human red-flag check and the earnings protocol are kept.
 
@@ -329,6 +330,11 @@ The game runs to 13 November; about seven weeks remain after the 25 September ro
 | Legacy + fundamental gate | What vetoing bad accounts does to the old screen (the "option C" question) |
 | Legacy on the liquid universe | The universe change alone |
 | US only, SEC accounts (with `--sec`) | The gate over 2015–2026, through 2018, 2020 and 2022 |
+
+**Robustness (`--sensitivity`).** Each of 12 variants changes one rule: drop gate G2, G3, G4 or G6;
+momentum-only or equal-thirds score; correlation limit 0.55 or 0.75; no volatility target; no stop;
+market risk premium 4.5% or 6.5%. Each is re-run on the same games and tested against the base with the
+bootstrap. The table shows which rules carry weight. It must not be used to pick a new "best" rule set.
 
 **Three honest limits**
 1. **Yahoo serves only four years of annual accounts**, so the full two-country strategy can be tested only from about 2024–2025. That is roughly 50–100 overlapping games but only 6–12 independent ones.

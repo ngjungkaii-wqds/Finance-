@@ -18,6 +18,10 @@ on:
         description: "Quick backtest (every 3rd game, about a third of the time)"
         type: boolean
         default: false
+      sensitivity:
+        description: "Also run the one-rule-at-a-time robustness table (adds 15-40 minutes)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -57,6 +61,7 @@ jobs:
           ARGS=""
           if [ "${{ inputs.sec }}" = "true" ]; then ARGS="$ARGS --sec"; fi
           if [ "${{ inputs.quick }}" = "true" ]; then ARGS="$ARGS --quick"; fi
+          if [ "${{ inputs.sensitivity }}" = "true" ]; then ARGS="$ARGS --sensitivity"; fi
           python run_backtest.py $ARGS
       - name: Commit reports
         if: always()

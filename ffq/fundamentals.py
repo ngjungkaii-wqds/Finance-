@@ -463,6 +463,7 @@ def gate(tk: str, m: dict, k_e: float) -> tuple[bool, list, list]:
         fails.append("G6 P/E unavailable or negative")
     elif pe > C.PE_MAX:
         fails.append(f"G6 P/E {pe:.0f} above {C.PE_MAX:.0f}")
+    fails = [f for f in fails if f[:2] in C.GATES or not f.startswith("G")]
     # soft flags for the human red-flag check (not rules)
     if not np.isnan(m.get("accruals", np.nan)) and m["accruals"] > 0.10:
         flags.append(f"high accruals {m['accruals']:.1%} of assets (profit well above cash flow)")

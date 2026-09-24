@@ -439,6 +439,33 @@ def write_report(state: dict, out_dir: str) -> str:
                  "US only, SEC EDGAR accounts: chained 9-week games")
         L.append("![US SEC test](figures/nav_us_sec.png)\n")
 
+    # ---- robustness
+    sens = state.get("sensitivity") or {}
+    if sens:
+        L.append("## 6b. Robustness: one rule changed at a time\n")
+        L.append("Each line changes a single rule and re-runs FFQ on the same games. This shows how much each "
+                 "rule matters. It was **not** used to choose the rules, which were fixed before any backtest; "
+                 "picking the best line after seeing this table would make the result in-sample.\n")
+        for sample, res in sens.items():
+            base = res.get("Base (rules as specified)")
+            rows = []
+            for label, g in res.items():
+                if g is None or g.empty:
+                    continue
+                st = game_stats(g)
+                if base is not None and label != "Base (rules as specified)":
+                    bt = block_bootstrap_diff(g["ret"], base["ret"])
+                    diff = (f"{pct(bt['mean_diff'])} [{pct(bt['mean_ci'][0])}, {pct(bt['mean_ci'][1])}]"
+                            f"{' *' if bt['mean_sig'] else ''}") if bt else "n/a"
+                else:
+                    diff = ""
+                rows.append([label, st["n"], pct(st["mean"]), pct(st["median"]), pctu(st["win"], 0),
+                             num(st["sharpe0"]), pct(st["worst"]), pct(st["p5"]), diff])
+            L.append(f"**{sample}**\n")
+            L.append(md_table(["Variant", "Games", "Mean 9-wk", "Median", "Win", "Sharpe (rf 0)", "Worst",
+                               "5th pct", "Mean vs base, 95% CI (* = significant)"], rows))
+            L.append("")
+
     # ---- caveats
     L.append("## 7. Limits of this backtest\n")
     L.append("\n".join([
